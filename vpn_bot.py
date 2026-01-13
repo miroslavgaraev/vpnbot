@@ -253,7 +253,7 @@ def process_successful_payment(message):
     try:
         vless_link = VLESS_TEMPLATE.format(
     uuid=uuid,
-    label=username  # или что ты хочешь в названии
+    label=username.split('_')[0]  # или что ты хочешь в названии
 )
     except Exception as e:
         bot.send_message(
