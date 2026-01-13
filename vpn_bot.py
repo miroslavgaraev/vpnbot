@@ -237,7 +237,7 @@ def process_successful_payment(message):
 
 
 
-    username = f"user_{message.from_user.id}_{int(time.time())}"
+    username = f"{message.from_user.id}_{int(time.time())}"
 
     # подбираем срок по тарифу
     days_map = {
