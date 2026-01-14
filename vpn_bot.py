@@ -324,7 +324,7 @@ def legal_info(call):
     )
     btn_back = types.InlineKeyboardButton(
         text="⬅️ Назад",
-        callback_data="back_to_main_menu"
+        callback_data="back_to_start"
     )
 
     keyboard.add(btn_policy)
@@ -521,10 +521,20 @@ def back_to_start(call):
         text="📱 Наш канал",
         url="https://t.me/voidlinkvpn"
     )
+    btn_legal = types.InlineKeyboardButton(
+    text="📄 Юр. информация",
+    callback_data="legal_info"
+    )
+    btn_promo_trial = types.InlineKeyboardButton(
+        text="🎁 Промокод / пробный период",
+        callback_data="promo_trial_menu"
+    )
 
     keyboard.add(btn_buy)
     keyboard.add(btn_support)
     keyboard.add(btn_channel)
+    keyboard.add(btn_legal)
+    keyboard.add(btn_promo_trial)
 
     bot.edit_message_text(
         welcome_text,
