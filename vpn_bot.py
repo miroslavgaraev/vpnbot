@@ -395,7 +395,7 @@ def handle_free_trial(call):
 def promo_enter(call):
     msg = bot.send_message(
         call.message.chat.id,
-        "Введите промокод (например, MELL):"
+        "Введите промокод:"
     )
     bot.register_next_step_handler(msg, process_promo_input)
 
