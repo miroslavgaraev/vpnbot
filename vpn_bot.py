@@ -4,6 +4,8 @@ import requests
 import time
 import json
 import os
+from datetime import datetime, timedelta, timezone
+from functools import partial 
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -12,8 +14,8 @@ MARZBAN_URL = os.getenv("MARZBAN_URL")
 
 ADMIN_IDS = [1000649034, 1835304379]
 
-DATA_FILE = "users_data.json"
-PROMOCODES_FILE = "promocodes.json"
+DATA_FILE = "data/users_data.json"
+PROMOCODES_FILE = "data/promocodes.json"
 
 MARZBAN_ADMIN_USERNAME = "root"
 MARZBAN_ADMIN_PASSWORD = "toor"
@@ -30,6 +32,7 @@ PRICES = {
     '6-months': {'price': 500, 'title': '6 месяцев', 'description': 'VoidLink VPN на 6 месяцев'},
 }
 
+pending_referrer_by_user = {}
 
 def load_json(path, default):
     if not os.path.exists(path):
@@ -71,12 +74,23 @@ def get_or_create_user(user):
         users[uid] = {
             "telegram_username": user.username,
             "trial_used": False,
-            "promo_used": []
+            "promo_used": [],
+            "tariff_expire": "",           # новое поле
+            "ref_free_keys": 0,            # сразу добавим поле из п.3 (чтобы не делать потом ещё раз)
         }
         save_users_data(users)
     else:
+        changed = False
         if users[uid].get("telegram_username") != user.username:
             users[uid]["telegram_username"] = user.username
+            changed = True
+        if "tariff_expire" not in users[uid]:
+            users[uid]["tariff_expire"] = ""
+            changed = True
+        if "ref_free_keys" not in users[uid]:
+            users[uid]["ref_free_keys"] = 0
+            changed = True
+        if changed:
             save_users_data(users)
     return users[uid]
 
@@ -100,7 +114,8 @@ def process_promo_input(message):
         return
 
     days = int(promocodes[code].get("days", 14))
-    give_vpn_access(message, days, f"промокод {code}")
+    user_id = message.from_user.id
+    give_vpn_access(user_id, days, f"промокод {code}")
 
     users = get_users_data()
     users[uid]["promo_used"].append(code)
@@ -113,7 +128,7 @@ def process_promo_input(message):
 
 
 
-def give_vpn_access(message, days: int, reason: str):
+def give_vpn_access(user_id: int, days: int, reason: str):
     VLESS_TEMPLATE = (
     "vless://{uuid}@150.241.80.64:443"
     "?security=reality&type=tcp&headerType=&path=&host="
@@ -123,7 +138,7 @@ def give_vpn_access(message, days: int, reason: str):
     "#🚀 VoidLink ({label}) [VLESS - tcp]"
 )
 
-    username = f"{message.from_user.id}_{int(time.time())}"
+    username = f"{user_id}_{int(time.time())}"
 
     # подбираем срок по тарифу
     user = create_marzban_user(username, days=days)
@@ -136,7 +151,7 @@ def give_vpn_access(message, days: int, reason: str):
 )
     except Exception as e:
         bot.send_message(
-            message.chat.id,
+            user_id,
             "❌ Ошибка при выдаче ключа. Напишите в поддержку: @suppVoidLink",
         )
         print("MARZBAN ERROR:", e)
@@ -169,7 +184,7 @@ def give_vpn_access(message, days: int, reason: str):
     keyboard.add(btn_guide)
 
     bot.send_message(
-        message.chat.id,
+        user_id,
         success_text,
         parse_mode='HTML',
         reply_markup=keyboard
@@ -178,11 +193,11 @@ def give_vpn_access(message, days: int, reason: str):
     for admin_id in ADMIN_IDS:
         bot.send_message(
             admin_id,
-            f"✅ Новая выдача доступа: User {message.from_user.id}, причина: {reason}, срок {days} дней",
+            f"✅ Новая выдача доступа: User {user_id}, причина: {reason}, срок {days} дней",
             parse_mode='HTML',
         )
 
-    print(f"✅ Новая выдача: User {message.from_user.id}, причина {reason}, срок {days} дней")
+    print(f"✅ Новая выдача: User {user_id}, причина {reason}, срок {days} дней")
     # --------- КОНЕЦ: твой существующий код ---------
 
 
@@ -270,7 +285,7 @@ def start(message):
     # Создание клавиатуры с кнопками
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     btn_promo_trial = types.InlineKeyboardButton(
-        text="🎁 Промокод / пробный период",
+        text="🎁 Бонусы",
         callback_data="promo_trial_menu"
     )
     btn_buy = types.InlineKeyboardButton(
@@ -353,6 +368,10 @@ def promo_trial_menu(call):
         text="🏷 Ввести промокод",
         callback_data="promo_enter"
     )
+    btn_referral = types.InlineKeyboardButton(
+        text="👥 Реферальная система",
+        callback_data="ref_system"
+    )
     btn_back = types.InlineKeyboardButton(
         text="⬅️ Назад",
         callback_data="back_to_start"
@@ -360,7 +379,9 @@ def promo_trial_menu(call):
 
     keyboard.add(btn_free_trial)
     keyboard.add(btn_enter_promo)
+    keyboard.add(btn_referral)
     keyboard.add(btn_back)
+    
 
     bot.edit_message_text(
         "Выберите действие:",
@@ -386,8 +407,8 @@ def handle_free_trial(call):
     uid = str(user.id)
     users[uid]["trial_used"] = True
     save_users_data(users)
-
-    give_vpn_access(call.message, 3, "бесплатный пробный период 3 дня")
+    
+    give_vpn_access(user.id, 3, "бесплатный пробный период 3 дня")
 
     bot.answer_callback_query(call.id, "✅ Бесплатный доступ выдан на 3 дня")
 
@@ -399,13 +420,108 @@ def promo_enter(call):
     )
     bot.register_next_step_handler(msg, process_promo_input)
 
+@bot.callback_query_handler(func=lambda call: call.data == "ref_system")
+def ref_system(call):
+    user = call.from_user
+    user_record = get_or_create_user(user)
+    uid = str(user.id)
+    users = get_users_data()
+    free_keys = users[uid].get("ref_free_keys", 0)
+
+    text = (
+        f"Ваш ID: <code>{uid}</code>\n\n"
+        "Если человек введет его при покупке любого из тарифов, "
+        "то вам будут начислены бесплатные 14 дней.\n\n"
+        f"Бесплатных ключей за приведенных людей: {free_keys}"
+    )
+
+    keyboard = types.InlineKeyboardMarkup()
+    btn_get_key = types.InlineKeyboardButton(
+        text="🗝 Получить бесплатный ключ",
+        callback_data="ref_get_key"
+    )
+    btn_back = types.InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data="promo_trial_menu"
+    )
+    keyboard.add(btn_get_key)
+    keyboard.add(btn_back)
+
+    bot.edit_message_text(
+        text,
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+@bot.callback_query_handler(func=lambda call: call.data == "ref_get_key")
+def ref_get_key(call):
+    user = call.from_user
+    uid = str(user.id)
+    users = get_users_data()
+    user_record = get_or_create_user(user)
+
+    free_keys = users[uid].get("ref_free_keys", 0)
+
+    if free_keys <= 0:
+        bot.answer_callback_query(call.id, "❌ У вас нет бесплатных ключей")
+        bot.send_message(
+            call.message.chat.id,
+            "❌ У вас нет бесплатных ключей за приведенных людей."
+        )
+        return
+
+    # уменьшаем счётчик
+    users[uid]["ref_free_keys"] = free_keys - 1
+    save_users_data(users)
+
+    # выдаем VPN-ключ как бонус на 14 дней (или другое кол-во дней)
+    give_vpn_access(user.id, 14, "бесплатный ключ за реферала")
+    users = get_users_data()
+    free_keys_after = users[uid].get("ref_free_keys", 0)
+
+    # собираем новый текст и клавиатуру, как в ref_system
+    text = (
+        f"Ваш ID: <code>{uid}</code>\n\n"
+        "Если человек введет его при покупке любого из тарифов, "
+        "то вам будут начислены бесплатные 14 дней.\n\n"
+        f"Бесплатных ключей за приведенных людей: {free_keys_after}"
+    )
+
+    keyboard = types.InlineKeyboardMarkup()
+    btn_get_key = types.InlineKeyboardButton(
+        text="🗝 Получить бесплатный ключ",
+        callback_data="ref_get_key"
+    )
+    btn_back = types.InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data="promo_trial_menu"
+    )
+    keyboard.add(btn_get_key)
+    keyboard.add(btn_back)
+
+    # обновляем то же сообщение, по которому нажата кнопка
+    try:
+        bot.edit_message_text(
+            text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        print("Ошибка обновления сообщения реферального меню:", e)
+
+    bot.answer_callback_query(call.id, "✅ Бесплатный ключ выдан")
+
+
+
 
 @bot.callback_query_handler(func=lambda call: call.data == 'show_tariffs')
 def show_tariffs(call):
     """Показать тарифы для выбора"""
 
-# бесплатный тариф показываем только если ещё не использовали
-    
+
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     for key, value in PRICES.items():
         btn = types.InlineKeyboardButton(
@@ -430,31 +546,94 @@ def show_tariffs(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('buy_'))
 def process_payment(call):
-    """Создание платежа"""
+    """Шаг 1: выбор тарифа и вопрос про реферальный ID"""
 
     tariff = call.data.replace('buy_', '')
-    
+
+    if tariff not in PRICES:
+        bot.answer_callback_query(call.id, "❌ Неизвестный тариф")
+        return
+
+    # сохраним выбранный тариф во временное поле message (хак)
+    msg = bot.send_message(
+        call.message.chat.id,
+        "Вы хотите ввести ID человека, который вас привёл? Он получит бесплатные 14 дней.\n\n"
+        "Если да, отправьте его ID в следующем сообщении.\n"
+        "Если нет — отправьте 0."
+    )
+    bot.register_next_step_handler(msg, partial(process_referral_step, tariff=tariff))
+def process_referral_step(message, tariff):
+    """Шаг 2: обработка введённого реферального ID и создание счёта"""
+
+    user_id = message.from_user.id
+    uid = str(user_id)
+
+    # достаём тариф, выбранный на предыдущем шаге
+    print(tariff)
+    if not tariff or tariff not in PRICES:
+        bot.send_message(message.chat.id, "Произошла ошибка. Пожалуйста, выберите тариф заново.")
+        return
+
+    text = message.text.strip()
+
+    # пытаемся разобрать ID
+    try:
+        ref_id = int(text)
+    except ValueError:
+        bot.send_message(message.chat.id, "ID должен быть числом. Отправьте команду /start и выберите тариф заново.")
+        return
+
+    referrer_id = None
+    if ref_id != 0:
+        # нельзя указать самого себя
+        if ref_id == user_id:
+            bot.send_message(message.chat.id, "❌ Нельзя указывать свой собственный ID. Попробуйте снова.")
+            # повторный запрос
+            msg = bot.send_message(
+                message.chat.id,
+                "Введите ID пригласившего или 0, если без реферала:"
+            )
+            msg._tariff_key = tariff
+            bot.register_next_step_handler(msg, process_referral_step)
+            return
+
+        # проверяем, что такой пользователь существует в users_data.json
+        users = get_users_data()
+        if str(ref_id) not in users:
+            bot.send_message(message.chat.id, "❌ Пользователь с таким ID не найден. Введите ID ещё раз или 0, если без реферала.")
+            msg = bot.send_message(
+                message.chat.id,
+                "Введите ID пригласившего или 0, если без реферала:"
+            )
+            msg._tariff_key = tariff
+            bot.register_next_step_handler(msg, process_referral_step)
+            return
+
+        referrer_id = ref_id
+
+    # если дошли сюда — ID валиден (или 0)
+    pending_referrer_by_user[uid] = referrer_id
 
     price_info = PRICES[tariff]
 
-    # Создание счета для оплаты
     prices = [types.LabeledPrice(
         label=price_info['title'],
         amount=price_info['price'] * 100  # Цена в копейках!
     )]
 
     bot.send_invoice(
-        chat_id=call.message.chat.id,
+        chat_id=message.chat.id,
         title=f"VoidLink - {price_info['title']}",
         description=price_info['description'],
-        invoice_payload=f"{tariff}_{call.from_user.id}",  # Полезная нагрузка для идентификации
+        invoice_payload=f"{tariff}_{user_id}",  # как и было
         provider_token=YOOKASSA_TOKEN,
         currency='RUB',
         prices=prices,
         start_parameter='servers-payment',
     )
 
-    bot.answer_callback_query(call.id, "✅ Счет создан!")
+    bot.send_message(message.chat.id, "✅ Счёт создан! Оплатите его через встроенную форму.")
+
 
 @bot.pre_checkout_query_handler(func=lambda query: True)
 def process_pre_checkout_query(pre_checkout_query):
@@ -467,25 +646,44 @@ def process_pre_checkout_query(pre_checkout_query):
 
 @bot.message_handler(content_types=['successful_payment'])
 def process_successful_payment(message):
-    """Обработка успешной оплаты"""
     payment_info = message.successful_payment
-    print("INVOICE PAYLOAD:", payment_info.invoice_payload)
-
-    # Извлекаем информацию о платеже
     tariff_key = payment_info.invoice_payload.split('_')[0]
-    print("TARIFF KEY:", tariff_key)
-    # подбираем срок по тарифу
-    
 
     days_map = {
         "1-month": 30,
         "2-months": 60,
         "4-months": 120,
         "6-months": 180,
-        "free-trial": 3
     }
-    days = days_map.get(tariff_key, 30)
-    give_vpn_access(message, days, f'подписка {days} дней')
+    days = days_map.get(tariff_key)
+
+    # получаем/создаём запись пользователя
+    user_record = get_or_create_user(message.from_user)
+    uid_int = message.from_user.id  # int
+    uid = str(uid_int)
+    users = get_users_data()
+
+    if days:
+        give_vpn_access(uid_int, days, f'подписка {days} дней')
+
+        expire_dt = datetime.now(timezone.utc) + timedelta(days=days)
+        users[uid]["tariff_expire"] = expire_dt.isoformat()
+
+        # реферальный бонус
+        referrer_id = pending_referrer_by_user.pop(uid, None)
+        if referrer_id:
+            ref_uid = str(referrer_id)
+            if ref_uid in users:
+                current = users[ref_uid].get("ref_free_keys", 0)
+                users[ref_uid]["ref_free_keys"] = current + 1
+                bot.send_message(
+                    referrer_id,
+                    "🎉 Вам начислен новый бесплатный ключ за приглашённого пользователя!\n"
+                    "Зайдите в раздел «Бонусы» → «Реферальная система», чтобы активировать его."
+            )
+
+        save_users_data(users)
+
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_start')
 def back_to_start(call):
