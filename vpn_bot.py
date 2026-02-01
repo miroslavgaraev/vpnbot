@@ -343,11 +343,13 @@ def legal_info(call):
     keyboard.add(btn_policy)
     keyboard.add(btn_offer)
     keyboard.add(btn_back)
-
-    bot.edit_message_text(
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        print(f"Ошибка удаления: {e}")
+    bot.send_message(
+        call.message.chat.id,
         text,
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
         reply_markup=keyboard
     )
 
@@ -381,10 +383,14 @@ def promo_trial_menu(call):
     keyboard.add(btn_back)
     
 
-    bot.edit_message_text(
-        "Выберите действие:",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+    bot.send_message(
+        call.message.chat.id,
+        "Выберите дейтсвие:",
+        parse_mode="HTML",
         reply_markup=keyboard
     )
 
@@ -534,10 +540,13 @@ def show_tariffs(call):
     )
     keyboard.add(btn_back)
 
-    bot.edit_message_text(
-        "💳 <b>Выберите тариф:</b>",
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+    bot.send_message(
         call.message.chat.id,
-        call.message.message_id,
+        "Выберите подходящий тариф:",
         parse_mode='HTML',
         reply_markup=keyboard
     )
