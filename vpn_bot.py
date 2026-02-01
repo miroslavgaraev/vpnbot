@@ -177,7 +177,7 @@ def give_vpn_access(user_id: int, days: int, reason: str):
 
     btn_guide = types.InlineKeyboardButton(
         text="📱 Инструкция по подключению",
-        url="https://telegra.ph/Gajd-na-podklyuchenie-Void-Link-11-27"
+        url="https://telegra.ph/Gajd-na-podklyuchenie-k-VoidLink-02-01"
     )
 
     keyboard.add(btn_support)
@@ -267,6 +267,8 @@ def create_marzban_user(username: str, days: int = 30,) -> str:
 def start(message):
     """Обработчик команды /start"""
 
+    
+
     welcome_text = """
 👋 Добро пожаловать в <b>VoidLink</b>, пользователь!
 
@@ -313,12 +315,8 @@ def start(message):
     keyboard.add(btn_legal)
     keyboard.add(btn_promo_trial)
 
-    bot.send_message(
-        message.chat.id,
-        welcome_text,
-        parse_mode='HTML',
-        reply_markup=keyboard
-    )
+    with open('banner.jpg', 'rb') as photo:
+        bot.send_photo(message.chat.id, photo, caption=welcome_text, parse_mode='HTML', reply_markup=keyboard)
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "legal_info")
@@ -687,60 +685,13 @@ def process_successful_payment(message):
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_start')
 def back_to_start(call):
-    """Вернуться в начало"""
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
 
-    welcome_text = """
-👋 Добро пожаловать в <b>VoidLink</b>, пользователь!
-
-💨 Высокая скорость
-👾 Доступ ко всем сайтам
-🗓️ Неделя бесплатно!
-
-👫 Пригласите друзей в наш сервис!
-
-📌 <b>Обязательно (!!)</b>
-Подпишитесь на наш канал
-
-⚡️ Подключение мгновенное после оплаты!
-    """
-
-    keyboard = types.InlineKeyboardMarkup(row_width=1)
-
-    btn_buy = types.InlineKeyboardButton(
-        text="💳 Купить VPN",
-        callback_data="show_tariffs"
-    )
-
-    btn_support = types.InlineKeyboardButton(
-        text="💬 Поддержка",
-        url="https://t.me/voidlinkvpn"
-    )
-    btn_channel = types.InlineKeyboardButton(
-        text="📱 Наш канал",
-        url="https://t.me/voidlinkvpn"
-    )
-    btn_legal = types.InlineKeyboardButton(
-    text="📄 Юр. информация",
-    callback_data="legal_info"
-    )
-    btn_promo_trial = types.InlineKeyboardButton(
-        text="🎁 Промокод / пробный период",
-        callback_data="promo_trial_menu"
-    )
-
-    keyboard.add(btn_buy)
-    keyboard.add(btn_support)
-    keyboard.add(btn_channel)
-    keyboard.add(btn_legal)
-    keyboard.add(btn_promo_trial)
-
-    bot.edit_message_text(
-        welcome_text,
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode='HTML',
-        reply_markup=keyboard
-    )
+    # Вызываем функцию start, которую мы изменили в предыдущем шаге
+    start(call.message)
 
 
 @bot.message_handler(commands=['notify_expiry'])
