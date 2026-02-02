@@ -76,7 +76,10 @@ def get_or_create_user(user):
             "trial_used": False,
             "promo_used": [],
             "tariff_expire": "",           # новое поле
-            "ref_free_keys": 0,            # сразу добавим поле из п.3 (чтобы не делать потом ещё раз)
+            "ref_free_keys": 0,
+            "balance": 0.0,  
+            "referred_by": None,
+            "ref_bonus_paid": False,                      
         }
         save_users_data(users)
     else:
@@ -266,7 +269,21 @@ def create_marzban_user(username: str, days: int = 30,) -> str:
 @bot.message_handler(commands=['start'])
 def start(message):
     """Обработчик команды /start"""
-
+    user_id = str(message.from_user.id)
+    user_record = get_or_create_user(message.from_user)
+    
+    # Проверяем, есть ли в команде /start ID пригласившего
+    args = message.text.split()
+    if len(args) > 1:
+        referrer_id = args[1]
+        users = get_users_data()
+        
+        # Если пользователь новый и не сам себя пригласил
+        if users[user_id].get("referred_by") is None and referrer_id != user_id:
+            if referrer_id in users:
+                users[user_id]["referred_by"] = referrer_id
+                save_users_data(users)
+                bot.send_message(user_id, "🎁 Вы перешли по реферальной ссылке!")
     
 
     welcome_text = """
@@ -430,18 +447,27 @@ def ref_system(call):
     user_record = get_or_create_user(user)
     uid = str(user.id)
     users = get_users_data()
-    free_keys = users[uid].get("ref_free_keys", 0)
+    balance = users[uid].get("balance", 0)
+    bot_username = bot.get_me().username
+    ref_link = f"https://t.me/{bot_username}?start={uid}"
 
     text = (
-        f"Ваш ID: <code>{uid}</code>\n\n"
-        "Если человек введет его при покупке любого из тарифов, "
-        "то вам будут начислены бесплатные 14 дней.\n\n"
-        f"Бесплатных ключей за приведенных людей: {free_keys}"
+        f"👥 <b>Реферальная система</b>\n\n"
+        f"Ваш баланс: <b>{balance} руб.</b>\n"
+        f"Для вывода средств напишите нашему саппорту, либо обменяйте 100р на месяц нашего VPN\n"
+        f"Ваша доля: <b>60%</b> от каждой покупки друга\n\n"
+        f"Ваша ссылка для приглашения:\n<code>{ref_link}</code>"
     )
 
+    
+
     keyboard = types.InlineKeyboardMarkup()
+    btn_support = types.InlineKeyboardButton(
+        text="💸 Вывести деньги",
+        url="https://t.me/suppVoidLink"
+    )
     btn_get_key = types.InlineKeyboardButton(
-        text="🗝 Получить бесплатный ключ",
+        text="🗝 Обменять 100р на подписку",
         callback_data="ref_get_key"
     )
     btn_back = types.InlineKeyboardButton(
@@ -449,6 +475,7 @@ def ref_system(call):
         callback_data="promo_trial_menu"
     )
     keyboard.add(btn_get_key)
+    keyboard.add(btn_support)
     keyboard.add(btn_back)
 
     bot.edit_message_text(
@@ -464,59 +491,21 @@ def ref_get_key(call):
     uid = str(user.id)
     users = get_users_data()
     user_record = get_or_create_user(user)
+    balance = users[uid].get("balance", 0.0)
+    exchange_cost = 100.0  # Цена обмена
 
-    free_keys = users[uid].get("ref_free_keys", 0)
-
-    if free_keys <= 0:
-        bot.answer_callback_query(call.id, "❌ У вас нет бесплатных ключей")
-        bot.send_message(
-            call.message.chat.id,
-            "❌ У вас нет бесплатных ключей за приведенных людей."
-        )
+    if balance < exchange_cost:
+        bot.answer_callback_query(call.id, f"❌ Недостаточно средств (нужно {exchange_cost} руб.)", show_alert=True)
         return
-
-    # уменьшаем счётчик
-    users[uid]["ref_free_keys"] = free_keys - 1
+    users[uid]["balance"] = round(balance - exchange_cost, 2)
     save_users_data(users)
+    # Выдаем 30 дней (месяц)
+    give_vpn_access(call.from_user.id, 30, "обмен баланса на 1 месяц")
 
-    # выдаем VPN-ключ как бонус на 14 дней (или другое кол-во дней)
-    give_vpn_access(user.id, 14, "бесплатный ключ за реферала")
-    users = get_users_data()
-    free_keys_after = users[uid].get("ref_free_keys", 0)
-
-    # собираем новый текст и клавиатуру, как в ref_system
-    text = (
-        f"Ваш ID: <code>{uid}</code>\n\n"
-        "Если человек введет его при покупке любого из тарифов, "
-        "то вам будут начислены бесплатные 14 дней.\n\n"
-        f"Бесплатных ключей за приведенных людей: {free_keys_after}"
-    )
-
-    keyboard = types.InlineKeyboardMarkup()
-    btn_get_key = types.InlineKeyboardButton(
-        text="🗝 Получить бесплатный ключ",
-        callback_data="ref_get_key"
-    )
-    btn_back = types.InlineKeyboardButton(
-        text="⬅️ Назад",
-        callback_data="promo_trial_menu"
-    )
-    keyboard.add(btn_get_key)
-    keyboard.add(btn_back)
-
-    # обновляем то же сообщение, по которому нажата кнопка
-    try:
-        bot.edit_message_text(
-            text,
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
-    except Exception as e:
-        print("Ошибка обновления сообщения реферального меню:", e)
-
-    bot.answer_callback_query(call.id, "✅ Бесплатный ключ выдан")
+    bot.answer_callback_query(call.id, "✅ Успешно! Вам начислен 1 месяц VPN.", show_alert=True)
+    
+    # Сразу обновляем текст меню рефералки, чтобы увидеть новый баланс
+    ref_system(call)
 
 
 
@@ -553,93 +542,37 @@ def show_tariffs(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('buy_'))
 def process_payment(call):
-    """Шаг 1: выбор тарифа и вопрос про реферальный ID"""
-
     tariff = call.data.replace('buy_', '')
 
     if tariff not in PRICES:
         bot.answer_callback_query(call.id, "❌ Неизвестный тариф")
         return
 
-    # сохраним выбранный тариф во временное поле message (хак)
-    msg = bot.send_message(
-        call.message.chat.id,
-        "Вы хотите ввести ID человека, который вас привёл? Он получит бесплатные 14 дней.\n\n"
-        "Если да, отправьте его ID в следующем сообщении.\n"
-        "Если нет — отправьте 0."
-    )
-    bot.register_next_step_handler(msg, partial(process_referral_step, tariff=tariff))
-def process_referral_step(message, tariff):
-    """Шаг 2: обработка введённого реферального ID и создание счёта"""
-
-    user_id = message.from_user.id
-    uid = str(user_id)
-
-    # достаём тариф, выбранный на предыдущем шаге
-    print(tariff)
-    if not tariff or tariff not in PRICES:
-        bot.send_message(message.chat.id, "Произошла ошибка. Пожалуйста, выберите тариф заново.")
-        return
-
-    text = message.text.strip()
-
-    # пытаемся разобрать ID
-    try:
-        ref_id = int(text)
-    except ValueError:
-        bot.send_message(message.chat.id, "ID должен быть числом. Отправьте команду /start и выберите тариф заново.")
-        return
-
-    referrer_id = None
-    if ref_id != 0:
-        # нельзя указать самого себя
-        if ref_id == user_id:
-            bot.send_message(message.chat.id, "❌ Нельзя указывать свой собственный ID. Попробуйте снова.")
-            # повторный запрос
-            msg = bot.send_message(
-                message.chat.id,
-                "Введите ID пригласившего или 0, если без реферала:"
-            )
-            msg._tariff_key = tariff
-            bot.register_next_step_handler(msg, process_referral_step)
-            return
-
-        # проверяем, что такой пользователь существует в users_data.json
-        users = get_users_data()
-        if str(ref_id) not in users:
-            bot.send_message(message.chat.id, "❌ Пользователь с таким ID не найден. Введите ID ещё раз или 0, если без реферала.")
-            msg = bot.send_message(
-                message.chat.id,
-                "Введите ID пригласившего или 0, если без реферала:"
-            )
-            msg._tariff_key = tariff
-            bot.register_next_step_handler(msg, process_referral_step)
-            return
-
-        referrer_id = ref_id
-
-    # если дошли сюда — ID валиден (или 0)
-    pending_referrer_by_user[uid] = referrer_id
-
     price_info = PRICES[tariff]
+    user_id = call.from_user.id
 
     prices = [types.LabeledPrice(
         label=price_info['title'],
-        amount=price_info['price'] * 100  # Цена в копейках!
+        amount=price_info['price'] * 100  # Копейки
     )]
 
+    # Удаляем старое меню с тарифами
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+
     bot.send_invoice(
-        chat_id=message.chat.id,
+        chat_id=call.message.chat.id,
         title=f"VoidLink - {price_info['title']}",
         description=price_info['description'],
-        invoice_payload=f"{tariff}_{user_id}",  # как и было
+        invoice_payload=f"{tariff}_{user_id}",
         provider_token=YOOKASSA_TOKEN,
         currency='RUB',
         prices=prices,
         start_parameter='servers-payment',
     )
-
-    bot.send_message(message.chat.id, "✅ Счёт создан! Оплатите его через встроенную форму.")
+    bot.send_message(call.message.chat.id, "✅ Счёт создан! Оплатите его через встроенную форму.")
 
 
 @bot.pre_checkout_query_handler(func=lambda query: True)
@@ -655,7 +588,7 @@ def process_pre_checkout_query(pre_checkout_query):
 def process_successful_payment(message):
     payment_info = message.successful_payment
     tariff_key = payment_info.invoice_payload.split('_')[0]
-
+    total_amount = payment_info.total_amount / 100
     days_map = {
         "1-month": 30,
         "2-months": 60,
@@ -677,16 +610,18 @@ def process_successful_payment(message):
         users[uid]["tariff_expire"] = expire_dt.isoformat()
 
         # реферальный бонус
-        referrer_id = pending_referrer_by_user.pop(uid, None)
-        if referrer_id:
+        referrer_id = users[uid].get("referred_by")
+        if referrer_id and not users[uid].get("ref_bonus_paid", False):
             ref_uid = str(referrer_id)
             if ref_uid in users:
-                current = users[ref_uid].get("ref_free_keys", 0)
-                users[ref_uid]["ref_free_keys"] = current + 1
+                reward = round(total_amount * 0.6, 2)  # Считаем 60%
+                users[str(referrer_id)]["balance"] = users[str(referrer_id)].get("balance", 0.0) + reward
+                users[uid]["ref_bonus_paid"] = True
                 bot.send_message(
                     referrer_id,
-                    "🎉 Вам начислен новый бесплатный ключ за приглашённого пользователя!\n"
-                    "Зайдите в раздел «Бонусы» → «Реферальная система», чтобы активировать его."
+                    f"💰 Вам начислено <b>{reward} руб.</b> за покупку вашего реферала!\n"
+                    f"Проверить баланс можно в разделе «Бонусы».",
+                    parse_mode="HTML"
             )
 
         save_users_data(users)
