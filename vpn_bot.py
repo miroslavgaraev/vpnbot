@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from functools import partial 
+import threading
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -118,17 +119,74 @@ def process_promo_input(message):
 
     days = int(promocodes[code].get("days", 14))
     user_id = message.from_user.id
-    give_vpn_access(user_id, days, f"промокод {code}")
-
-    users = get_users_data()
-    users[uid]["promo_used"].append(code)
-    save_users_data(users)
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("📱 Выбрать устройство", callback_data=f"ask_device_{days}_promo"))
 
     bot.send_message(
         message.chat.id,
-        f"✅ Промокод {code} активирован. Доступ выдан на {days} дней."
-    )
+        f"✅ Промокод {code} принят! Для получения ключа выберите ваше устройство:",
+        reply_markup=keyboard
+)
 
+
+def delayed_check_activity(user_id, username):
+    """Проверка активности через 3 часа"""
+    time.sleep(3 * 3600)  # Спим 3 часа
+    
+    try:
+        token = get_marzban_token()
+        url = f"{MARZBAN_URL}/api/user/{username}"
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = requests.get(url, headers=headers, timeout=10, verify=False)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            # Если трафик 0, значит не подключился
+            if data.get("used_traffic", 0) == 0:
+                bot.send_message(
+                    user_id, 
+                    "👋 Вижу, вы до сих пор не начали использовать VPN. У вас возникли какие-то проблемы? Напишите в нашу поддержку: @suppVoidLink",
+                    parse_mode="HTML"
+                )
+    except Exception as e:
+        print(f"Ошибка в delayed_check: {e}")
+
+def auto_check_expiry():
+    """Фоновая проверка срока годности подписки"""
+    while True:
+        users = get_users_data()
+        now = datetime.now(timezone.utc)
+        changed = False
+
+        for uid, data in users.items():
+            expire_str = data.get("tariff_expire")
+            # Проверяем только если дата есть и уведомление еще не было отправлено
+            if expire_str and not data.get("expiry_notified", False):
+                expire_dt = datetime.fromisoformat(expire_str)
+                
+                if now > expire_dt:
+                    try:
+                        bot.send_message(
+                            int(uid), 
+                            "⚠️ Ваша подписка закончилась. Не хотите ли её продлить?",
+                            reply_markup=types.InlineKeyboardMarkup().add(
+                                types.InlineKeyboardButton("🔄 Продлить", callback_data="show_tariffs")
+                            )
+                        )
+                        users[uid]["expiry_notified"] = True # Чтобы отправилось 1 раз
+                        changed = True
+                    except:
+                        pass
+            
+            # Если купили новую подписку, сбрасываем флаг уведомления (в логику оплаты)
+        
+        if changed:
+            save_users_data(users)
+            
+        time.sleep(3600) # Проверка раз в час
+
+# Запуск потока проверки
+threading.Thread(target=auto_check_expiry, daemon=True).start()
 
 
 def give_vpn_access(user_id: int, days: int, reason: str):
@@ -192,6 +250,13 @@ def give_vpn_access(user_id: int, days: int, reason: str):
         parse_mode='HTML',
         reply_markup=keyboard
     )
+
+    users = get_users_data()
+    uid = str(user_id)
+    expire_dt = datetime.now(timezone.utc) + timedelta(days=days)
+    users[uid]["tariff_expire"] = expire_dt.isoformat()
+    save_users_data(users)
+    threading.Thread(target=delayed_check_activity, args=(user_id, username)).start()
 
     for admin_id in ADMIN_IDS:
         bot.send_message(
@@ -291,46 +356,31 @@ def start(message):
 
 💨 Высокая скорость
 👾 Доступ ко всем сайтам
-🗓️ Неделя бесплатно!
+🗓️ Три дня бесплатно!
 
-👫 Пригласите друзей в наш сервис!
+👫 Пригласите друзей в наш сервис, за это вы получаете 60% от их покупок!
 
 📌 <b>Обязательно (!!)</b>
-Подпишитесь на наш канал
+<a href='https://t.me/voidlinkvpn'>Подпишитесь на наш канал</a>
 
 ⚡️ Подключение мгновенное после оплаты!
+<b>Поддержка:</b> <a href='https://t.me/suppVoidLink'>VoidLink Support</a>
     """
 
     # Создание клавиатуры с кнопками
     keyboard = types.InlineKeyboardMarkup(row_width=1)
-    btn_promo_trial = types.InlineKeyboardButton(
-        text="🎁 Бонусы",
-        callback_data="promo_trial_menu"
-    )
-    btn_buy = types.InlineKeyboardButton(
-        text="💳 Купить VPN",
-        callback_data="show_tariffs"
-    )
-   
-    btn_support = types.InlineKeyboardButton(
-        text="💬 Поддержка",
-        url="https://t.me/suppVoidLink"
-    )
-    btn_channel = types.InlineKeyboardButton(
-        text="📱 Наш канал",
-        url="https://t.me/voidlinkvpn"
-    )
-    btn_legal = types.InlineKeyboardButton(
-    text="📄 Юр. информация",
-    callback_data="legal_info"
-    )
-
-
+    btn_buy = types.InlineKeyboardButton(text="💳 Купить VPN", callback_data="show_tariffs")
+    btn_trial = types.InlineKeyboardButton(text="🎁 Пробный период", callback_data="promo_free_trial")
+    btn_promo = types.InlineKeyboardButton(text="🏷 Ввести промокод", callback_data="promo_enter")
+    
+    # Кнопки рефералки и юр. инфо
+    btn_ref = types.InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref_system")
+    btn_legal = types.InlineKeyboardButton(text="📄 Юр. информация", callback_data="legal_info")
     keyboard.add(btn_buy)
-    keyboard.add(btn_support)
-    keyboard.add(btn_channel)
+    keyboard.add(btn_trial, btn_promo)
+    keyboard.add(btn_ref)
     keyboard.add(btn_legal)
-    keyboard.add(btn_promo_trial)
+ 
 
     with open('banner.jpg', 'rb') as photo:
         bot.send_photo(message.chat.id, photo, caption=welcome_text, parse_mode='HTML', reply_markup=keyboard)
@@ -371,46 +421,6 @@ def legal_info(call):
     )
 
 
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "promo_trial_menu")
-def promo_trial_menu(call):
-    keyboard = types.InlineKeyboardMarkup()
-
-    btn_free_trial = types.InlineKeyboardButton(
-        text="🎁 Бесплатный пробный период",
-        callback_data="promo_free_trial"
-    )
-    btn_enter_promo = types.InlineKeyboardButton(
-        text="🏷 Ввести промокод",
-        callback_data="promo_enter"
-    )
-    btn_referral = types.InlineKeyboardButton(
-        text="👥 Реферальная система",
-        callback_data="ref_system"
-    )
-    btn_back = types.InlineKeyboardButton(
-        text="⬅️ Назад",
-        callback_data="back_to_start"
-    )
-
-    keyboard.add(btn_free_trial)
-    keyboard.add(btn_enter_promo)
-    keyboard.add(btn_referral)
-    keyboard.add(btn_back)
-    
-
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
-        pass
-    bot.send_message(
-        call.message.chat.id,
-        "Выберите дейтсвие:",
-        parse_mode="HTML",
-        reply_markup=keyboard
-    )
-
 @bot.callback_query_handler(func=lambda call: call.data == "promo_free_trial")
 def handle_free_trial(call):
     user = call.from_user
@@ -429,9 +439,76 @@ def handle_free_trial(call):
     users[uid]["trial_used"] = True
     save_users_data(users)
     
-    give_vpn_access(user.id, 3, "бесплатный пробный период 3 дня")
+    call.data = "ask_device_3_trial"
+    ask_device(call)
 
-    bot.answer_callback_query(call.id, "✅ Бесплатный доступ выдан на 3 дня")
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ask_device_"))
+def ask_device(call):
+    # Извлекаем количество дней и причину из callback_data (например, ask_device_3_trial)
+    parts = call.data.split("_")
+    days = parts[2]
+    reason_key = parts[3] # 'trial' или 'promo'
+
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    # Передаем данные дальше в кнопки
+    keyboard.add(
+        types.InlineKeyboardButton("🍏 iOS", callback_data=f"guide_ios_{days}_{reason_key}"),
+        types.InlineKeyboardButton("🤖 Android", callback_data=f"guide_and_{days}_{reason_key}"),
+        types.InlineKeyboardButton("💻 PC", callback_data=f"guide_pc_{days}_{reason_key}")
+    )
+
+    bot.edit_message_text(
+        "📱 <b>Выберите ваше устройство:</b>\nЧтобы мы подобрали правильную инструкцию.",
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("guide_"))
+def show_guide(call):
+    # Формат: guide_ios_3_trial
+    parts = call.data.split("_")
+    device = parts[1]
+    days = parts[2]
+    reason_key = parts[3]
+
+    # Ссылки на ваши гайды
+    guides = {
+        "ios": "https://apps.apple.com/us/app/v2raytun/id6476628951", 
+        "and": "https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru",
+        "pc": "http://v2raytun.com/"
+    }
+
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("✅ Я установил(а)!", callback_data=f"final_give_{days}_{reason_key}"))
+
+    bot.edit_message_text(
+        f"📖 <b>Скачать приложение можно по этой ссылке:</b>\n{guides.get(device, '')}\n\n"
+        "Установите его, а затем нажмите на кнопку ниже, чтобы получить ваш ключ.",
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("final_give_"))
+def final_give(call):
+    parts = call.data.split("_")
+    days = int(parts[2])
+    reason_key = parts[3]
+    
+    reason = "бесплатный период" if reason_key == "trial" else "промокод"
+    
+    # Удаляем сообщение с инструкцией, чтобы выдать ключ
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+
+    # ВЫЗОВ ВАШЕЙ ФУНКЦИИ ИЗ ФАЙЛА
+    give_vpn_access(call.from_user.id, days, reason)
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "promo_enter")
 def promo_enter(call):
@@ -470,10 +547,7 @@ def ref_system(call):
         text="🗝 Обменять 100р на подписку",
         callback_data="ref_get_key"
     )
-    btn_back = types.InlineKeyboardButton(
-        text="⬅️ Назад",
-        callback_data="promo_trial_menu"
-    )
+    btn_back = types.InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_start")
     keyboard.add(btn_get_key)
     keyboard.add(btn_support)
     keyboard.add(btn_back)
@@ -605,9 +679,7 @@ def process_successful_payment(message):
 
     if days:
         give_vpn_access(uid_int, days, f'подписка {days} дней')
-
-        expire_dt = datetime.now(timezone.utc) + timedelta(days=days)
-        users[uid]["tariff_expire"] = expire_dt.isoformat()
+        users[uid]["expiry_notified"] = False
 
         # реферальный бонус
         referrer_id = users[uid].get("referred_by")
@@ -676,8 +748,68 @@ def notify_expiry(message):
         bot.reply_to(message, "❌ Используй: /notify_expiry 123456789 1 месяц")
 
 
+@bot.message_handler(commands=['add_promocode'])
+def add_promocode(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        # Формат: /add_promocode НАЗВАНИЕ ДНИ
+        parts = message.text.split()
+        if len(parts) < 3:
+            bot.reply_to(message, "❌ Ошибка. Используйте: <code>/add_promocode NAME DAYS</code>", parse_mode="HTML")
+            return
+
+        name = parts[1].upper() # Сохраняем всегда в верхнем регистре
+        days = int(parts[2])
+
+        with open(PROMOCODES_FILE, 'r', encoding='utf-8') as f:
+            promos = json.load(f)
+
+        promos[name] = {
+            "days": days,
+            "active": True
+        }
+
+        with open(PROMOCODES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(promos, f, indent=4, ensure_ascii=False)
+
+        bot.reply_to(message, f"✅ Промокод <b>{name}</b> на {days} дн. успешно добавлен!", parse_mode="HTML")
+
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ Ошибка: {e}")
+
+@bot.message_handler(commands=['delete_promocode'])
+def delete_promocode(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        # Формат: /delete_promocode NAME
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ Ошибка. Используйте: <code>/delete_promocode NAME</code>", parse_mode="HTML")
+            return
+
+        name = parts[1].upper()
+
+        with open(PROMOCODES_FILE, 'r', encoding='utf-8') as f:
+            promos = json.load(f)
+
+        if name in promos:
+            del promos[name]
+            with open(PROMOCODES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(promos, f, indent=4, ensure_ascii=False)
+            bot.reply_to(message, f"🗑 Промокод <b>{name}</b> удален.", parse_mode="HTML")
+        else:
+            bot.reply_to(message, "❓ Такого промокода не существует.")
+
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ Ошибка: {e}")
+
 
 # Запуск бота
+threading.Thread(target=auto_check_expiry, daemon=True).start()
 if __name__ == '__main__':
     print("🚀 Бот запущен и работает!")
     print("💳 Платежи через ЮKassa подключены!")
