@@ -117,6 +117,11 @@ def process_promo_input(message):
         bot.send_message(message.chat.id, "❌ Этот промокод уже был активирован на вашем аккаунте")
         return
 
+    users = get_users_data()
+    if code not in users[uid]["promo_used"]:
+        users[uid]["promo_used"].append(code)
+        save_users_data(users)
+
     days = int(promocodes[code].get("days", 14))
     user_id = message.from_user.id
     keyboard = types.InlineKeyboardMarkup()
