@@ -120,7 +120,7 @@ def process_promo_input(message):
     days = int(promocodes[code].get("days", 14))
     user_id = message.from_user.id
     keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(types.InlineKeyboardButton("📱 Выбрать устройство", callback_data=f"ask_device_{days}_promo"))
+    keyboard.add(types.InlineKeyboardButton("📱 Выбрать устройство", callback_data=f"ask_device_{days}_{code}"))
 
     bot.send_message(
         message.chat.id,
@@ -498,7 +498,7 @@ def final_give(call):
     days = int(parts[2])
     reason_key = parts[3]
     
-    reason = "бесплатный период" if reason_key == "trial" else "промокод"
+    reason = "бесплатный период" if reason_key == "trial" else f"промокод {reason_key}"
     
     # Удаляем сообщение с инструкцией, чтобы выдать ключ
     try:
