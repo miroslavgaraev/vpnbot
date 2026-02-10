@@ -812,6 +812,40 @@ def delete_promocode(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ Ошибка: {e}")
 
+@bot.message_handler(commands=['broadcast'])
+def broadcast_message(message):
+    # Проверка прав админа
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    # Извлекаем текст рассылки
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, "❌ Введите текст: <code>/broadcast привет всем!</code>", parse_mode="HTML")
+        return
+
+    broadcast_text = parts[1]
+    users = get_users_data()
+    count = 0
+    blocked = 0
+
+    bot.reply_to(message, f"🚀 Начинаю рассылку на {len(users)} пользователей...")
+
+    for uid in users:
+        try:
+            bot.send_message(int(uid), broadcast_text, parse_mode="HTML")
+            count += 1
+            # Небольшая пауза, чтобы Telegram не заблокировал за спам
+            time.sleep(0.05) 
+        except Exception as e:
+            # Обычно ошибка значит, что пользователь заблокировал бота
+            blocked += 1
+
+    bot.send_message(
+        message.chat.id, 
+        f"✅ Рассылка завершена!\n\nДоставлено: {count}\nЗаблокировали бота: {blocked}"
+    )
+
 
 # Запуск бота
 threading.Thread(target=auto_check_expiry, daemon=True).start()
