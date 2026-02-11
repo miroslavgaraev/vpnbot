@@ -15,6 +15,8 @@ MARZBAN_URL = os.getenv("MARZBAN_URL")
 
 ADMIN_IDS = [1000649034, 1835304379]
 
+CHANNEL_ID = "@voidlinkvpn"  # Замените на юзернейм вашего канала
+
 DATA_FILE = "data/users_data.json"
 PROMOCODES_FILE = "data/promocodes.json"
 
@@ -132,6 +134,19 @@ def process_promo_input(message):
         f"✅ Промокод {code} принят! Для получения ключа выберите ваше устройство:",
         reply_markup=keyboard
 )
+
+
+def is_subscribed(user_id):
+    try:
+        # Проверяем статус пользователя в канале
+        member = bot.get_chat_member(CHANNEL_ID, user_id)
+        # Статусы, которые считаются подпиской
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        print(f"Ошибка при проверке подписки: {e}")
+        # Если бот не админ в канале, проверка может не сработать. 
+        # В таком случае лучше возвращать True, чтобы не блокировать всех, либо False для безопасности.
+        return False
 
 
 def delayed_check_activity(user_id, username):
@@ -426,10 +441,38 @@ def legal_info(call):
     )
 
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("check_sub_"))
+def check_subscription_handler(call):
+    user_id = call.from_user.id
+    target = call.data.replace("check_sub_", "")
+
+    if is_subscribed(user_id):
+        bot.answer_callback_query(call.id, "✅ Подписка подтверждена!", show_alert=False)
+        if target == "promo":
+            promo_enter(call)
+        elif target == "trial":
+            handle_free_trial(call)
+    else:
+        bot.answer_callback_query(call.id, "❌ Вы всё еще не подписаны на канал!", show_alert=True)
+
 @bot.callback_query_handler(func=lambda call: call.data == "promo_free_trial")
 def handle_free_trial(call):
     user = call.from_user
     user_record = get_or_create_user(user)
+
+    if not is_subscribed(user.id):
+        keyboard = types.InlineKeyboardMarkup()
+        btn_channel = types.InlineKeyboardButton("📢 Подписаться на канал", url="https://t.me/voidlinkvpn")
+        btn_check = types.InlineKeyboardButton("✅ Я подписался", callback_data="check_sub_trial")
+        keyboard.add(btn_channel)
+        keyboard.add(btn_check)
+
+        bot.send_message(
+            call.message.chat.id,
+            "⚠️ Для получения пробного периода нужно подписаться на наш канал!",
+            reply_markup=keyboard
+        )
+        return
 
     if user_record.get("trial_used"):
         bot.answer_callback_query(call.id, "❌ Пробный период уже использован")
@@ -443,7 +486,6 @@ def handle_free_trial(call):
     uid = str(user.id)
     users[uid]["trial_used"] = True
     save_users_data(users)
-    
     call.data = "ask_device_3_trial"
     ask_device(call)
 
@@ -517,10 +559,33 @@ def final_give(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "promo_enter")
 def promo_enter(call):
-    msg = bot.send_message(
-        call.message.chat.id,
-        "Введите промокод:"
-    )
+    user_id = call.from_user.id
+    
+    # Если не подписан
+    if not is_subscribed(user_id):
+        keyboard = types.InlineKeyboardMarkup()
+        btn_channel = types.InlineKeyboardButton("📢 Подписаться на канал", url="https://t.me/voidlinkvpn")
+        btn_check = types.InlineKeyboardButton("✅ Я подписался", callback_data="check_sub_promo")
+        keyboard.add(btn_channel)
+        keyboard.add(btn_check)
+
+        # Удаляем старое сообщение (с фото из главного меню)
+
+        # Отправляем новое текстовое сообщение
+        bot.send_message(
+            call.message.chat.id, 
+            "⚠️ Чтобы использовать промокоды, подпишитесь на наш канал!", 
+            reply_markup=keyboard
+        )
+        return
+
+    # Если подписан — запрашиваем код (тоже через удаление старого, чтобы интерфейс был чистым)
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+        
+    msg = bot.send_message(call.message.chat.id, "🎫 <b>Введите промокод:</b>", parse_mode="HTML")
     bot.register_next_step_handler(msg, process_promo_input)
 
 @bot.callback_query_handler(func=lambda call: call.data == "ref_system")
@@ -557,13 +622,18 @@ def ref_system(call):
     keyboard.add(btn_support)
     keyboard.add(btn_back)
 
-    bot.edit_message_text(
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+
+    bot.send_message(
+        call.message.chat.id,
         text,
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
         parse_mode="HTML",
         reply_markup=keyboard
     )
+
 @bot.callback_query_handler(func=lambda call: call.data == "ref_get_key")
 def ref_get_key(call):
     user = call.from_user
