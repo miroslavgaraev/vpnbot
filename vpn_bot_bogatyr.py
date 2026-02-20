@@ -396,7 +396,7 @@ def start(message):
     keyboard.add(btn_legal)
  
 
-    with open('banner.jpg', 'rb') as photo:
+    with open('banner2.jpg', 'rb') as photo:
         bot.send_photo(message.chat.id, photo, caption=welcome_text, parse_mode='HTML', reply_markup=keyboard)
 
 
