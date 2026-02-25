@@ -13,7 +13,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 YOOKASSA_TOKEN = os.getenv("YOOKASSA_TOKEN")
 MARZBAN_URL = os.getenv("MARZBAN_URL")
 
-ADMIN_IDS = [1000649034, 1835304379]
+ADMIN_IDS = [1000649034, 1835304379, 7782759386]
 
 CHANNEL_ID = "@voidlinkvpn"  # Замените на юзернейм вашего канала
 
@@ -226,10 +226,10 @@ def give_vpn_access(user_id: int, days: int, reason: str):
     
     uuid = user["proxies"]["vless"]["id"]
     try:
-        vless_link = VLESS_TEMPLATE.format(
-    uuid=uuid,
-    label=username.split('_')[0]  # или что ты хочешь в названии
-)
+        # Берем ссылку на подписку из ответа API
+        links = user.get("links", [])
+        vless_links_text ="\n".join(links)
+        
     except Exception as e:
         bot.send_message(
             user_id,
@@ -244,7 +244,7 @@ def give_vpn_access(user_id: int, days: int, reason: str):
 
 Ваш ключ:
 
-<code>{vless_link}</code>
+<code>{vless_links_text}</code>
 
 💬 Возникли вопросы? Пишите в поддержку
 """
@@ -343,8 +343,6 @@ def create_marzban_user(username: str, days: int = 30,) -> str:
     resp = requests.get(url, headers=headers, timeout=10, verify=False)
     resp.raise_for_status()
     data = resp.json()
-
-
     # В ответе обычно есть links и/или subscription_url [web:107]
     return data
 
