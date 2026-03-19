@@ -398,12 +398,11 @@ def start(message):
         text="📱 Инструкция по подключению",
         url="https://telegra.ph/kak-podklyuchitsya-k-HAPP-03-18"
     )
-    keyboard.add(btn_guide)
     keyboard.add(btn_buy)
     keyboard.add(btn_trial, btn_promo)
     keyboard.add(btn_ref)
     keyboard.add(btn_legal)
- 
+    keyboard.add(btn_guide)
 
     with open('banner.jpg', 'rb') as photo:
         bot.send_photo(message.chat.id, photo, caption=welcome_text, parse_mode='HTML', reply_markup=keyboard)
