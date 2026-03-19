@@ -258,7 +258,7 @@ def give_vpn_access(user_id: int, days: int, reason: str):
 
     btn_guide = types.InlineKeyboardButton(
         text="📱 Инструкция по подключению",
-        url="https://telegra.ph/Gajd-na-podklyuchenie-k-VoidLink-02-01"
+        url="https://telegra.ph/kak-podklyuchitsya-k-HAPP-03-18"
     )
 
     keyboard.add(btn_support)
@@ -394,6 +394,11 @@ def start(message):
     # Кнопки рефералки и юр. инфо
     btn_ref = types.InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref_system")
     btn_legal = types.InlineKeyboardButton(text="📄 Юр. информация", callback_data="legal_info")
+    btn_guide = types.InlineKeyboardButton(
+        text="📱 Инструкция по подключению",
+        url="https://telegra.ph/kak-podklyuchitsya-k-HAPP-03-18"
+    )
+    keyboard.add(btn_guide)
     keyboard.add(btn_buy)
     keyboard.add(btn_trial, btn_promo)
     keyboard.add(btn_ref)
@@ -512,17 +517,15 @@ def ask_device(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("guide_"))
 def show_guide(call):
-    # Формат: guide_ios_3_trial
     parts = call.data.split("_")
     device = parts[1]
     days = parts[2]
     reason_key = parts[3]
 
-    # Ссылки на ваши гайды
     guides = {
-        "ios": "https://apps.apple.com/us/app/v2raytun/id6476628951", 
-        "and": "https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru",
-        "pc": "http://v2raytun.com/"
+        "ios": "https://apps.apple.com/app/id6504287215", 
+        "and": "https://play.google.com/store/apps/details?id=com.happproxy",
+        "pc": "https://www.happ.su/main/ru"
     }
 
     keyboard = types.InlineKeyboardMarkup()
