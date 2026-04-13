@@ -506,7 +506,7 @@ def ask_device(call):
         types.InlineKeyboardButton("💻 PC", callback_data=f"guide_pc_{days}_{reason_key}")
     )
 
-    bot.edit_message_text(
+    bot.edit_message_caption(
         "📱 <b>Выберите ваше устройство:</b>\nЧтобы мы подобрали правильную инструкцию.",
         call.message.chat.id,
         call.message.message_id,
@@ -530,7 +530,7 @@ def show_guide(call):
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(types.InlineKeyboardButton("✅ Я установил(а)!", callback_data=f"final_give_{days}_{reason_key}"))
 
-    bot.edit_message_text(
+    bot.edit_message_caption(
         f"📖 <b>Скачать приложение можно по этой ссылке:</b>\n{guides.get(device, '')}\n\n"
         "Установите его, а затем нажмите на кнопку ниже, чтобы получить ваш ключ.",
         call.message.chat.id,
